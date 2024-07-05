@@ -1,5 +1,5 @@
-import asyncio
-import websockets
+import socket
+import threading
 import json
 import random
 
@@ -62,8 +62,9 @@ PERGUNTAS = [
 ]
 
 class Jogador:
-    def __init__(self, websocket, nome):
-        self.websocket = websocket
+    def __init__(self, conexao, endereco, nome):
+        self.conexao = conexao
+        self.endereco = endereco
         self.nome = nome
         self.pontuacao = 0
         self.respostas = 0
@@ -73,23 +74,23 @@ class Jogo:
     def __init__(self):
         self.jogadores = []
         self.pergunta_atual = None
-        self.tempo_restante = 60  # 60 segundos de jogo
+        self.tempo_restante = 60
         self.perguntas_usadas = set()
 
-    async def adicionar_jogador(self, websocket, nome):
-        jogador = Jogador(websocket, nome)
+    def adicionar_jogador(self, conexao, endereco, nome):
+        jogador = Jogador(conexao, endereco, nome)
         self.jogadores.append(jogador)
         if len(self.jogadores) == 2:
-            await self.iniciar_jogo()
+            self.iniciar_jogo()
 
-    async def remover_jogador(self, websocket):
-        self.jogadores = [j for j in self.jogadores if j.websocket != websocket]
+    def remover_jogador(self, conexao):
+        self.jogadores = [j for j in self.jogadores if j.conexao != conexao]
 
-    async def iniciar_jogo(self):
-        await self.proxima_pergunta()
-        asyncio.create_task(self.contar_tempo())
+    def iniciar_jogo(self):
+        self.proxima_pergunta()
+        threading.Thread(target=self.contar_tempo).start()
 
-    async def proxima_pergunta(self):
+    def proxima_pergunta(self):
         perguntas_disponiveis = [p for p in PERGUNTAS if p["pergunta"] not in self.perguntas_usadas]
         if not perguntas_disponiveis:
             self.perguntas_usadas.clear()
@@ -97,25 +98,25 @@ class Jogo:
         
         self.pergunta_atual = random.choice(perguntas_disponiveis)
         self.perguntas_usadas.add(self.pergunta_atual["pergunta"])
-        await self.enviar_pergunta()
+        self.enviar_pergunta()
 
-    async def receber_resposta(self, websocket, resposta):
-        jogador = next((j for j in self.jogadores if j.websocket == websocket), None)
+    def receber_resposta(self, conexao, resposta):
+        jogador = next((j for j in self.jogadores if j.conexao == conexao), None)
         if jogador and not jogador.respondeu_atual:
             jogador.respondeu_atual = True
             jogador.respostas += 1
             if resposta == self.pergunta_atual["resposta_correta"]:
                 jogador.pontuacao += 1
             
-            await self.broadcast(json.dumps({
+            self.broadcast(json.dumps({
                 "type": "player_answered",
                 "player": jogador.nome
             }))
 
             if all(j.respondeu_atual for j in self.jogadores):
-                await self.proxima_pergunta()
+                self.proxima_pergunta()
 
-    async def enviar_pergunta(self):
+    def enviar_pergunta(self):
         for jogador in self.jogadores:
             jogador.respondeu_atual = False
         mensagem = {
@@ -124,39 +125,19 @@ class Jogo:
             "opcoes": self.pergunta_atual["opcoes"],
             "tempo_restante": self.tempo_restante
         }
-        await self.broadcast(json.dumps(mensagem))
+        self.broadcast(json.dumps(mensagem))
 
-    async def contar_tempo(self):
-        try:
-            while self.tempo_restante > 0:
-                await asyncio.sleep(1)
-                self.tempo_restante -= 1
-                await self.broadcast(json.dumps({
-                    "type": "timer_update",
-                    "tempo_restante": self.tempo_restante
-                }))
-            await self.finalizar_jogo()
-        except asyncio.CancelledError:
-            pass
-
-    async def receber_resposta(self, websocket, resposta):
-        jogador = next((j for j in self.jogadores if j.websocket == websocket), None)
-        if jogador and not jogador.respondeu_atual:
-            jogador.respondeu_atual = True
-            jogador.respostas += 1
-            if resposta == self.pergunta_atual["resposta_correta"]:
-                jogador.pontuacao += 1
-            
-            await self.broadcast(json.dumps({
-                "type": "player_answered",
-                "player": jogador.nome
+    def contar_tempo(self):
+        while self.tempo_restante > 0:
+            self.tempo_restante -= 1
+            self.broadcast(json.dumps({
+                "type": "timer_update",
+                "tempo_restante": self.tempo_restante
             }))
+            threading.Event().wait(1)
+        self.finalizar_jogo()
 
-            if all(j.respondeu_atual for j in self.jogadores):
-                self.pergunta_atual = random.choice(PERGUNTAS)
-                await self.enviar_pergunta()
-
-    async def finalizar_jogo(self):
+    def finalizar_jogo(self):
         resultados = [
             {
                 "nome": jogador.nome,
@@ -165,34 +146,41 @@ class Jogo:
             }
             for jogador in self.jogadores
         ]
-        await self.broadcast(json.dumps({
+        self.broadcast(json.dumps({
             "type": "end_game",
             "resultados": resultados
         }))
 
-    async def broadcast(self, mensagem):
+    def broadcast(self, mensagem):
         for jogador in self.jogadores:
             try:
-                await jogador.websocket.send(mensagem)
-            except websockets.exceptions.ConnectionClosed:
-                await self.remover_jogador(jogador.websocket)
+                jogador.conexao.send((mensagem + '\n').encode())
+            except:
+                self.remover_jogador(jogador.conexao)
+
+def handle_client(conexao, endereco):
+    try:
+        nome = conexao.recv(1024).decode()
+        jogo.adicionar_jogador(conexao, endereco, nome)
+        while True:
+            mensagem = conexao.recv(1024).decode()
+            data = json.loads(mensagem)
+            if data["type"] == "answer":
+                jogo.receber_resposta(conexao, data["answer"])
+    except:
+        pass
+    finally:
+        jogo.remover_jogador(conexao)
+        conexao.close()
 
 jogo = Jogo()
 
-async def handle_connection(websocket, path):
-    try:
-        nome = await websocket.recv()
-        await jogo.adicionar_jogador(websocket, nome)
-        async for mensagem in websocket:
-            data = json.loads(mensagem)
-            if data["type"] == "answer":
-                await jogo.receber_resposta(websocket, data["answer"])
-    except websockets.exceptions.ConnectionClosed:
-        pass
-    finally:
-        await jogo.remover_jogador(websocket)
+servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+servidor.bind(('0.0.0.0', 8765))
+servidor.listen(2)
 
-start_server = websockets.serve(handle_connection, "0.0.0.0", 8765)
+print("Servidor iniciado. Aguardando conexões...")
 
-asyncio.get_event_loop().run_until_complete(start_server)
-asyncio.get_event_loop().run_forever()
+while True:
+    conexao, endereco = servidor.accept()
+    threading.Thread(target=handle_client, args=(conexao, endereco)).start()

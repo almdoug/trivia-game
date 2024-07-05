@@ -1,36 +1,50 @@
 import sys
 import json
-import asyncio
-import websockets
+import socket
+import threading
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit, QFrame, QProgressBar, QGraphicsDropShadowEffect
 from PyQt5.QtCore import QTimer, Qt, QObject, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QPalette, QPixmap, QLinearGradient, QPainter, QBrush
 
-class WebSocketClient(QObject):
+class SocketClient(QObject):
     messageReceived = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
-        self.websocket = None
+        self.socket = None
+        self.buffer = ""
 
-    async def connect(self, uri, name):
-        self.websocket = await websockets.connect(uri)
-        await self.websocket.send(name)
+    def connect(self, host, port, name):
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.connect((host, port))
+        self.socket.send(name.encode())
+        threading.Thread(target=self.receive_messages, daemon=True).start()
 
+    def receive_messages(self):
         while True:
             try:
-                message = await self.websocket.recv()
-                self.messageReceived.emit(message)
-            except websockets.exceptions.ConnectionClosed:
+                data = self.socket.recv(1024).decode()
+                self.buffer += data
+                while '\n' in self.buffer:
+                    message, self.buffer = self.buffer.split('\n', 1)
+                    try:
+                        json_message = json.loads(message)
+                        self.messageReceived.emit(json.dumps(json_message))
+                    except json.JSONDecodeError:
+                        print(f"Erro ao decodificar JSON: {message}")
+            except Exception as e:
+                print(f"Erro ao receber mensagem: {e}")
                 break
+
+    def send_message(self, message):
+        self.socket.send((message + '\n').encode())
 
 class TriviaGame(QWidget):
     def __init__(self):
         super().__init__()
         self.initUI()
-        self.client = WebSocketClient()
+        self.client = SocketClient()
         self.client.messageReceived.connect(self.handleMessage)
-        self.asyncLoop = asyncio.get_event_loop()
         self.startGame()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.updateProgressBar)
@@ -171,7 +185,7 @@ class TriviaGame(QWidget):
         widget.setGraphicsEffect(shadow)
 
     def startGame(self):
-        self.asyncLoop.run_in_executor(None, self.asyncLoop.run_forever)
+        pass
 
     def connectToServer(self):
         name = self.nameInput.text()
@@ -180,10 +194,7 @@ class TriviaGame(QWidget):
             self.nameInput.setEnabled(False)
             self.serverInput.setEnabled(False)
             self.startButton.setEnabled(False)
-            asyncio.run_coroutine_threadsafe(
-                self.client.connect(f'ws://{self.server_address}:8765', name),
-                self.asyncLoop
-            )
+            self.client.connect(self.server_address, 8765, name)
 
     def handleMessage(self, message):
         data = json.loads(message)
@@ -218,10 +229,8 @@ class TriviaGame(QWidget):
         self.timer.start(1000)  # Atualiza a cada segundo
 
     def sendAnswer(self, index):
-        asyncio.run_coroutine_threadsafe(
-            self.client.websocket.send(json.dumps({"type": "answer", "answer": index})),
-            self.asyncLoop
-        )
+        message = json.dumps({"type": "answer", "answer": index})
+        self.client.send_message(message)
         for button in self.answerButtons:
             button.setEnabled(False)
         self.timer.stop()
