@@ -5,6 +5,7 @@ import websockets
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit, QFrame, QProgressBar, QGraphicsDropShadowEffect
 from PyQt5.QtCore import QTimer, Qt, QObject, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QPalette, QPixmap, QLinearGradient, QPainter, QBrush
+import socket
 
 class WebSocketClient(QObject):
     messageReceived = pyqtSignal(str)
@@ -34,8 +35,8 @@ class TriviaGame(QWidget):
         self.startGame()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.updateProgressBar)
-        self.progress_value = 60  # Inicializa com 60 segundos
-        self.server_address = "localhost"  # Endereço padrão
+        self.progress_value = 60
+        self.server_address = None
 
     def initUI(self):
         self.setWindowTitle('Jogo de Trivia')
@@ -95,12 +96,12 @@ class TriviaGame(QWidget):
         name_layout.addWidget(self.startButton)
         main_layout.addLayout(name_layout)
 
-        # Área do endereço do servidor
-        server_layout = QHBoxLayout()
-        self.serverInput = QLineEdit(self)
-        self.serverInput.setPlaceholderText("Endereço do servidor (ex: 192.168.0.10)")
-        server_layout.addWidget(self.serverInput)
-        main_layout.addLayout(server_layout)
+        # Área de descoberta do servidor
+        discover_layout = QHBoxLayout()
+        self.discoverButton = QPushButton('Descobrir Servidor', self)
+        self.discoverButton.clicked.connect(self.discoverServer)
+        discover_layout.addWidget(self.discoverButton)
+        main_layout.addLayout(discover_layout)
 
         # Área da pergunta
         question_frame = QFrame(self)
@@ -173,12 +174,33 @@ class TriviaGame(QWidget):
     def startGame(self):
         self.asyncLoop.run_in_executor(None, self.asyncLoop.run_forever)
 
+    def discoverServer(self):
+        self.discoverButton.setEnabled(False)
+        self.discoverButton.setText("Procurando servidor...")
+        asyncio.run_coroutine_threadsafe(self.discover(), self.asyncLoop)
+
+    async def discover(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.settimeout(5)
+
+        try:
+            sock.sendto(b'DISCOVER_TRIVIA_SERVER', ('<broadcast>', 5000))
+            data, addr = sock.recvfrom(1024)
+            self.server_address = data.decode()
+            self.discoverButton.setText(f"Servidor encontrado: {self.server_address}")
+            self.startButton.setEnabled(True)
+        except socket.timeout:
+            self.discoverButton.setText("Servidor não encontrado. Tente novamente.")
+            self.discoverButton.setEnabled(True)
+        finally:
+            sock.close()
+
     def connectToServer(self):
         name = self.nameInput.text()
-        self.server_address = self.serverInput.text() or "localhost"
-        if name:
+        if name and self.server_address:
             self.nameInput.setEnabled(False)
-            self.serverInput.setEnabled(False)
+            self.discoverButton.setEnabled(False)
             self.startButton.setEnabled(False)
             asyncio.run_coroutine_threadsafe(
                 self.client.connect(f'ws://{self.server_address}:8765', name),
