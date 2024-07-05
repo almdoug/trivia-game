@@ -1,228 +1,372 @@
 # Documentação do Jogo de Trivia
 
-## Introdução
-Este projeto consiste em um jogo de trivia multiplayer, onde dois jogadores competem respondendo perguntas de conhecimento geral. O jogo é composto por um cliente, desenvolvido com PyQt5 para a interface gráfica, e um servidor, que gerencia a lógica do jogo e a comunicação entre os jogadores usando WebSockets.
-
 ## Propósito do Software
-O propósito deste software é proporcionar uma experiência de jogo interativa e educativa, onde os jogadores podem testar seus conhecimentos em diversas áreas. O jogo é projetado para ser jogado em tempo real, com perguntas sendo enviadas pelo servidor e respostas sendo recebidas dos clientes.
+O software implementa um jogo de trivia para dois jogadores, onde perguntas são enviadas do servidor para os clientes, e os jogadores respondem em tempo real. O objetivo é responder corretamente o maior número de perguntas no menor tempo possível.
 
 ## Motivação da Escolha do Protocolo de Transporte
+O protocolo de transporte escolhido foi o TCP (Transmission Control Protocol) devido às suas características de confiabilidade e controle de fluxo. Abaixo estão os principais motivos para a escolha do TCP:
 
-O protocolo WebSocket oferece uma série de características essenciais que se alinham perfeitamente com as necessidades específicas deste ambiente de jogo.
+### Confiabilidade
+O TCP garante a entrega confiável de pacotes de dados entre o cliente e o servidor. Isso é crucial para um jogo de trivia, onde a perda de dados pode resultar em perguntas ou respostas não recebidas, afetando a integridade do jogo.
 
-### WebSocket e TCP
+### Controle de Fluxo
+O TCP implementa mecanismos de controle de fluxo que ajudam a gerenciar a quantidade de dados que podem ser enviados antes de receber uma confirmação. Isso evita a sobrecarga da rede e garante que o servidor e os clientes possam processar os dados de maneira eficiente.
 
-O WebSocket é um protocolo que opera sobre TCP (Transmission Control Protocol), aproveitando-se das vantagens que o TCP oferece, enquanto adiciona funcionalidades específicas para comunicação bidirecional em tempo real.
+### Ordem dos Pacotes
+O TCP garante que os pacotes de dados sejam entregues na mesma ordem em que foram enviados. Em um jogo de trivia, a ordem das mensagens é essencial para manter a sequência correta de perguntas e respostas.
 
-- **Comunicação Bidirecional em Tempo Real**:
-  O WebSocket permite comunicação bidirecional entre o cliente e o servidor em tempo real. Isso é crucial para garantir que as perguntas sejam enviadas rapidamente e que as respostas dos jogadores sejam recebidas sem atrasos.
+### Detecção de Erros
+O TCP inclui mecanismos de detecção de erros que garantem que os dados corrompidos sejam retransmitidos. Isso é importante para manter a precisão das informações trocadas entre o cliente e o servidor.
 
-- **Conexão Persistente**:
-  Diferente do modelo tradicional de requisição-resposta do HTTP, o WebSocket mantém uma conexão aberta e persistente. Isso elimina a necessidade de estabelecer novas conexões para cada mensagem enviada, melhorando a eficiência da comunicação.
+### Conexão Orientada
+O TCP é um protocolo orientado a conexão, o que significa que uma conexão deve ser estabelecida antes que os dados possam ser trocados. Isso permite uma comunicação mais estruturada e segura entre o cliente e o servidor.
 
-- **Facilidade de Implementação de Funcionalidades em Tempo Real**:
-  A implementação de funcionalidades como atualizações de tempo, notificações de respostas de oponentes e atualizações de status do jogo é facilitada pelo WebSocket. A capacidade de enviar e receber dados em tempo real permite que o servidor mantenha todos os jogadores sincronizados, proporcionando uma experiência de jogo coesa.
+### Adequação ao Jogo de Trivia
+Para um jogo de trivia, onde a precisão e a integridade dos dados são fundamentais, o TCP é a escolha ideal. Ele garante que todas as perguntas, respostas e atualizações de tempo sejam entregues corretamente, proporcionando uma experiência de jogo justa e sem interrupções.
 
 ## Requisitos Mínimos de Funcionamento
-- Python 3.7 ou superior
-- Bibliotecas: `asyncio`, `websockets`, `json`, `random`, `socket`, `PyQt5`
+- Python 3.x
+- Bibliotecas: `socket`, `threading`, `json`, `random`
+- PyQt5 para a interface gráfica do cliente
 - Conexão de rede para comunicação entre cliente e servidor
 
 ## Funcionamento do Software
 
 ### Cliente
 O cliente é responsável por:
-- Conectar-se ao servidor de trivia
-- Enviar o nome do jogador ao servidor
-- Receber perguntas e opções de resposta do servidor
+- Conectar-se ao servidor
+- Enviar o nome do jogador
+- Receber perguntas e opções de resposta
 - Enviar respostas ao servidor
-- Exibir o tempo restante e o status do oponente
+- Exibir a interface gráfica do jogo
 
 ### Servidor
 O servidor é responsável por:
-- Gerenciar a conexão de múltiplos jogadores
+- Gerenciar conexões de jogadores
 - Enviar perguntas e opções de resposta aos jogadores
 - Receber e validar respostas dos jogadores
-- Manter o tempo restante para cada pergunta
-- Enviar atualizações de status e resultados finais aos jogadores
+- Manter o estado do jogo e calcular pontuações
+- Enviar atualizações de tempo e resultados aos jogadores
 
-## Protocolo de Comunicação
+## Documentação do Protocolo de Comunicação
 
 ### Eventos e Mensagens
 
 #### Cliente para Servidor
-1. **Conexão Inicial**: O cliente envia o nome do jogador ao servidor assim que a conexão é estabelecida.
-   ```json
-   {
-     "type": "connect",
-     "name": "Nome do Jogador"
-   }
-   ```
-   **Código do Cliente**:
-   ```python
-   async def connect_to_server():
-       uri = "ws://localhost:8765"
-       async with websockets.connect(uri) as websocket:
-           # Enviar o nome do jogador ao servidor
-           connect_message = {"type": "connect", "name": "Nome do Jogador"}
-           await websocket.send(json.dumps(connect_message))
-           # Aguardar resposta do servidor
-           response = await websocket.recv()
-           print(response)
-   ```
+- **Conexão Inicial**: Envia o nome do jogador ao conectar.
+  ```json
+  "nome_do_jogador"
+  ```
+  ```python
+  class SocketClient(QObject):
+      # ... código existente ...
+      def connect(self, host, port, name):
+          self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+          self.socket.connect((host, port))
+          self.socket.send(name.encode())
+          threading.Thread(target=self.receive_messages, daemon=True).start()
+      # ... código existente ...
+  ```
 
-2. **Resposta do Jogador**: O cliente envia a resposta selecionada pelo jogador.
-   ```json
-   {
-     "type": "answer",
-     "answer": 2
-   }
-   ```
-   **Código do Cliente**:
-   ```python
-   async def send_answer(websocket, answer):
-       # Enviar resposta do jogador ao servidor
-       answer_message = {"type": "answer", "answer": answer}
-       await websocket.send(json.dumps(answer_message))
-   ```
+- **Resposta do Jogador**: Envia a resposta escolhida pelo jogador.
+  ```json
+  {
+    "type": "answer",
+    "answer": <índice_da_resposta>
+  }
+  ```
+  ```python
+  class TriviaGame(QWidget):
+      # ... código existente ...
+      def sendAnswer(self, index):
+          message = json.dumps({"type": "answer", "answer": index})
+          self.client.send_message(message)
+          for button in self.answerButtons:
+              button.setEnabled(False)
+          self.timer.stop()
+          self.progressBar.setValue(0)
+      # ... código existente ...
+  ```
 
 #### Servidor para Cliente
-1. **Início do Jogo**: O servidor envia a primeira pergunta e opções de resposta aos jogadores.
-   ```json
-   {
-     "type": "start_game",
-     "pergunta": "Qual é a capital do Brasil?",
-     "opcoes": ["São Paulo", "Rio de Janeiro", "Brasília", "Salvador", "Belo Horizonte"],
-     "tempo_restante": 60
-   }
-   ```
-   **Código do Servidor**:
-   ```python
-   async def start_game(websocket, players):
-       question = {
-           "type": "start_game",
-           "pergunta": "Qual é a capital do Brasil?",
-           "opcoes": ["São Paulo", "Rio de Janeiro", "Brasília", "Salvador", "Belo Horizonte"],
-           "tempo_restante": 60
-       }
-       await asyncio.wait([player.send(json.dumps(question)) for player in players])
-   ```
+- **Início do Jogo**: Envia uma nova pergunta e opções de resposta.
+  ```json
+  {
+    "type": "start_game",
+    "pergunta": "Texto da pergunta",
+    "opcoes": ["Opção 1", "Opção 2", "Opção 3", "Opção 4", "Opção 5"],
+    "tempo_restante": <tempo_em_segundos>
+  }
+  ```
+  ```python
+  class Jogo:
+      # ... código existente ...
+      def enviar_pergunta(self):
+          for jogador in self.jogadores:
+              jogador.respondeu_atual = False
+          mensagem = {
+              "type": "start_game",
+              "pergunta": self.pergunta_atual["pergunta"],
+              "opcoes": self.pergunta_atual["opcoes"],
+              "tempo_restante": self.tempo_restante
+          }
+          self.broadcast(json.dumps(mensagem))
+      # ... código existente ...
+  ```
 
-2. **Atualização do Timer**: O servidor envia atualizações periódicas do tempo restante.
-   ```json
-   {
-     "type": "timer_update",
-     "tempo_restante": 45
-   }
-   ```
-   **Código do Servidor**:
-   ```python
-   async def update_timer(websocket, players, tempo_restante):
-       timer_message = {"type": "timer_update", "tempo_restante": tempo_restante}
-       await asyncio.wait([player.send(json.dumps(timer_message)) for player in players])
-   ```
+- **Resposta do Oponente**: Informa que o oponente respondeu.
+  ```json
+  {
+    "type": "player_answered",
+    "player": "Nome do jogador"
+  }
+  ```
+  ```python
+  class Jogo:
+      # ... código existente ...
+      def receber_resposta(self, conexao, resposta):
+          jogador = next((j for j in self.jogadores if j.conexao == conexao), None)
+          if jogador and not jogador.respondeu_atual:
+              jogador.respondeu_atual = True
+              jogador.respostas += 1
+              if resposta == self.pergunta_atual["resposta_correta"]:
+                  jogador.pontuacao += 1
+              
+              self.broadcast(json.dumps({
+                  "type": "player_answered",
+                  "player": jogador.nome
+              }))
+              if all(j.respondeu_atual for j in self.jogadores):
+                  self.proxima_pergunta()
+      # ... código existente ...
+  ```
 
-3. **Resposta do Oponente**: O servidor notifica quando o oponente responde.
-   ```json
-   {
-     "type": "player_answered",
-     "player": "Nome do Oponente"
-   }
-   ```
-   **Código do Servidor**:
-   ```python
-   async def notify_opponent_answered(websocket, opponent_name):
-       player_answered_message = {"type": "player_answered", "player": opponent_name}
-       await websocket.send(json.dumps(player_answered_message))
-   ```
+- **Atualização do Timer**: Envia a atualização do tempo restante.
+  ```json
+  {
+    "type": "timer_update",
+    "tempo_restante": <tempo_em_segundos>
+  }
+  ```
+  ```python
+  class Jogo:
+      # ... código existente ...
+      def contar_tempo(self):
+          while self.tempo_restante > 0:
+              self.tempo_restante -= 1
+              self.broadcast(json.dumps({
+                  "type": "timer_update",
+                  "tempo_restante": self.tempo_restante
+              }))
+              threading.Event().wait(1)
+          self.finalizar_jogo()
+      # ... código existente ...
+  ```
 
-4. **Fim do Jogo**: O servidor envia os resultados finais do jogo.
-   ```json
-   {
-     "type": "end_game",
-     "resultados": [
-       {
-         "nome": "Jogador 1",
-         "pontuacao": 3,
-         "respostas": 5
-       },
-       {
-         "nome": "Jogador 2",
-         "pontuacao": 4,
-         "respostas": 5
-       }
-     ]
-   }
-   ```
-   **Código do Servidor**:
-   ```python
-   async def end_game(websocket, players, resultados):
-       end_game_message = {
-           "type": "end_game",
-           "resultados": resultados
-       }
-       await asyncio.wait([player.send(json.dumps(end_game_message)) for player in players])
-   ```
+- **Fim do Jogo**: Envia os resultados finais do jogo.
+  ```json
+  {
+    "type": "end_game",
+    "resultados": [
+      {
+        "nome": "Nome do jogador",
+        "pontuacao": <pontuacao>,
+        "respostas": <numero_de_respostas>
+      },
+      ...
+    ]
+  }
+  ```
+  ```python
+  class Jogo:
+      # ... código existente ...
+      def finalizar_jogo(self):
+          resultados = [
+              {
+                  "nome": jogador.nome,
+                  "pontuacao": jogador.pontuacao,
+                  "respostas": jogador.respostas
+              }
+              for jogador in self.jogadores
+          ]
+          self.broadcast(json.dumps({
+              "type": "end_game",
+              "resultados": resultados
+          }))
+      # ... código existente ...
+  ```
 
 ## Fluxo de Eventos
 
-### Cliente
-1. **Conexão Inicial**:
-   - O cliente conecta-se ao servidor e envia o nome do jogador.
+### Eventos do Cliente
+1. **O cliente se conecta ao servidor e envia o nome do jogador.**
    ```python
-   await connect_to_server()
+   class SocketClient(QObject):
+       # ... código existente ...
+       def connect(self, host, port, name):
+           self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+           self.socket.connect((host, port))
+           self.socket.send(name.encode())
+           threading.Thread(target=self.receive_messages, daemon=True).start()
+       # ... código existente ...
    ```
 
-2. **Recepção da Pergunta**:
-   - O cliente recebe a pergunta e opções de resposta do servidor.
+2. **O cliente recebe a primeira pergunta e opções de resposta.**
    ```python
-   response = await websocket.recv()
+   class TriviaGame(QWidget):
+       # ... código existente ...
+       def handleMessage(self, message):
+           data = json.loads(message)
+           if data['type'] == 'start_game':
+               self.showQuestion(data)
+       # ... código existente ...
    ```
 
-3. **Envio da Resposta**:
-   - O cliente envia a resposta selecionada ao servidor.
+3. **Os jogadores enviam suas respostas ao servidor.**
    ```python
-   await send_answer(websocket, selected_answer)
+   class TriviaGame(QWidget):
+       # ... código existente ...
+       def sendAnswer(self, index):
+           message = json.dumps({"type": "answer", "answer": index})
+           self.client.send_message(message)
+           for button in self.answerButtons:
+               button.setEnabled(False)
+           self.timer.stop()
+           self.progressBar.setValue(0)
+       # ... código existente ...
    ```
 
-### Servidor
-1. **Gerenciamento de Conexões**:
-   - O servidor gerencia conexões de múltiplos jogadores e inicia o jogo quando ambos estão conectados.
+4. **O cliente recebe atualizações de tempo e status das respostas dos jogadores.**
    ```python
-   start_server = websockets.serve(handle_client, "localhost", 8765)
+   class TriviaGame(QWidget):
+       # ... código existente ...
+       def handleMessage(self, message):
+           data = json.loads(message)
+           if data['type'] == 'timer_update':
+               self.updateTimer(data)
+           elif data['type'] == 'player_answered':
+               self.updateOpponentStatus(data)
+       # ... código existente ...
    ```
 
-2. **Envio da Pergunta**:
-   - O servidor envia a primeira pergunta e opções de resposta aos jogadores.
+5. **O cliente recebe os resultados finais do jogo.**
    ```python
-   await start_game(websocket, players)
+   class TriviaGame(QWidget):
+       # ... código existente ...
+       def handleMessage(self, message):
+           data = json.loads(message)
+           if data['type'] == 'end_game':
+               self.showResults(data)
+       # ... código existente ...
    ```
 
-3. **Atualização do Timer**:
-   - O servidor envia atualizações periódicas do tempo restante.
+### Eventos do Servidor
+1. **O servidor aguarda a conexão de dois jogadores.**
    ```python
-   await update_timer(websocket, players, tempo_restante)
+   def handle_client(conexao, endereco):
+       try:
+           nome = conexao.recv(1024).decode()
+           jogo.adicionar_jogador(conexao, endereco, nome)
+           while True:
+               mensagem = conexao.recv(1024).decode()
+               data = json.loads(mensagem)
+               if data["type"] == "answer":
+                   jogo.receber_resposta(conexao, data["answer"])
+       except:
+           pass
+       finally:
+           jogo.remover_jogador(conexao)
+           conexao.close()
+
+   jogo = Jogo()
+
+   servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+   servidor.bind(('0.0.0.0', 8765))
+   servidor.listen(2)
+
+   print("Servidor iniciado. Aguardando conexões...")
+
+   while True:
+       conexao, endereco = servidor.accept()
+       threading.Thread(target=handle_client, args=(conexao, endereco)).start()
    ```
 
-4. **Recepção de Respostas**:
-   - O servidor recebe e valida respostas dos jogadores.
+2. **O servidor inicia o jogo enviando a primeira pergunta e opções de resposta.**
    ```python
-   async for message in websocket:
-       data = json.loads(message)
-       if data["type"] == "answer":
-           # Processar resposta
+   class Jogo:
+       # ... código existente ...
+       def iniciar_jogo(self):
+           self.proxima_pergunta()
+           threading.Thread(target=self.contar_tempo).start()
+
+       def enviar_pergunta(self):
+           for jogador in self.jogadores:
+               jogador.respondeu_atual = False
+           mensagem = {
+               "type": "start_game",
+               "pergunta": self.pergunta_atual["pergunta"],
+               "opcoes": self.pergunta_atual["opcoes"],
+               "tempo_restante": self.tempo_restante
+           }
+           self.broadcast(json.dumps(mensagem))
+       # ... código existente ...
    ```
 
-5. **Notificação de Resposta do Oponente**:
-   - O servidor notifica o jogador quando o oponente responde.
+3. **O servidor valida as respostas e atualiza as pontuações.**
    ```python
-   await notify_opponent_answered(websocket, opponent_name)
+   class Jogo:
+       # ... código existente ...
+       def receber_resposta(self, conexao, resposta):
+           jogador = next((j for j in self.jogadores if j.conexao == conexao), None)
+           if jogador and not jogador.respondeu_atual:
+               jogador.respondeu_atual = True
+               jogador.respostas += 1
+               if resposta == self.pergunta_atual["resposta_correta"]:
+                   jogador.pontuacao += 1
+               
+               self.broadcast(json.dumps({
+                   "type": "player_answered",
+                   "player": jogador.nome
+               }))
+               if all(j.respondeu_atual for j in self.jogadores):
+                   self.proxima_pergunta()
+       # ... código existente ...
    ```
 
-6. **Envio dos Resultados Finais**:
-   - O servidor envia os resultados finais do jogo.
+4. **O servidor envia atualizações de tempo e status das respostas dos jogadores.**
    ```python
-   await end_game(websocket, players, resultados)
+   class Jogo:
+       # ... código existente ...
+       def contar_tempo(self):
+           while self.tempo_restante > 0:
+               self.tempo_restante -= 1
+               self.broadcast(json.dumps({
+                   "type": "timer_update",
+                   "tempo_restante": self.tempo_restante
+               }))
+               threading.Event().wait(1)
+           self.finalizar_jogo()
+       # ... código existente ...
+   ```
+
+5. **O servidor envia os resultados finais aos jogadores.**
+   ```python
+   class Jogo:
+       # ... código existente ...
+       def finalizar_jogo(self):
+           resultados = [
+               {
+                   "nome": jogador.nome,
+                   "pontuacao": jogador.pontuacao,
+                   "respostas": jogador.respostas
+               }
+               for jogador in self.jogadores
+           ]
+           self.broadcast(json.dumps({
+               "type": "end_game",
+               "resultados": resultados
+           }))
+       # ... código existente ...
    ```
 
 ### Estados do Jogo
@@ -233,4 +377,4 @@ O servidor é responsável por:
 5. **Finalizando Jogo**: O servidor envia os resultados finais e encerra o jogo.
 
 ## Conclusão
-Este projeto demonstra a aplicação de WebSockets para criar um jogo multiplayer em tempo real. A escolha do protocolo WebSocket permite uma comunicação eficiente e de baixa latência, essencial para a experiência de jogo. A interface gráfica desenvolvida com PyQt5 proporciona uma experiência de usuário rica e interativa.
+Este projeto demonstra a aplicação de um protocolo TCP para criar um jogo multiplayer em tempo real. A escolha do protocolo TCP permite uma comunicação eficiente e de baixa latência, essencial para a experiência de jogo. A interface gráfica desenvolvida com PyQt5 proporciona uma experiência de usuário rica e interativa.
