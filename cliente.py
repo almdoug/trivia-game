@@ -35,7 +35,6 @@ class TriviaGame(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.updateProgressBar)
         self.progress_value = 60  # Inicializa com 60 segundos
-        self.server_address = "localhost"  # Endereço padrão
 
     def initUI(self):
         self.setWindowTitle('Jogo de Trivia')
@@ -94,13 +93,6 @@ class TriviaGame(QWidget):
         name_layout.addWidget(self.nameInput)
         name_layout.addWidget(self.startButton)
         main_layout.addLayout(name_layout)
-
-        # Área do endereço do servidor
-        server_layout = QHBoxLayout()
-        self.serverInput = QLineEdit(self)
-        self.serverInput.setPlaceholderText("Endereço do servidor (ex: 192.168.0.10)")
-        server_layout.addWidget(self.serverInput)
-        main_layout.addLayout(server_layout)
 
         # Área da pergunta
         question_frame = QFrame(self)
@@ -175,15 +167,10 @@ class TriviaGame(QWidget):
 
     def connectToServer(self):
         name = self.nameInput.text()
-        self.server_address = self.serverInput.text() or "localhost"
         if name:
             self.nameInput.setEnabled(False)
-            self.serverInput.setEnabled(False)
             self.startButton.setEnabled(False)
-            asyncio.run_coroutine_threadsafe(
-                self.client.connect(f'ws://{self.server_address}:8765', name),
-                self.asyncLoop
-            )
+            asyncio.run_coroutine_threadsafe(self.client.connect('ws://localhost:8765', name), self.asyncLoop)
 
     def handleMessage(self, message):
         data = json.loads(message)
