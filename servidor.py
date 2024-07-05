@@ -2,6 +2,7 @@ import asyncio
 import websockets
 import json
 import random
+import socket
 
 PERGUNTAS = [
     {
@@ -139,23 +140,6 @@ class Jogo:
         except asyncio.CancelledError:
             pass
 
-    async def receber_resposta(self, websocket, resposta):
-        jogador = next((j for j in self.jogadores if j.websocket == websocket), None)
-        if jogador and not jogador.respondeu_atual:
-            jogador.respondeu_atual = True
-            jogador.respostas += 1
-            if resposta == self.pergunta_atual["resposta_correta"]:
-                jogador.pontuacao += 1
-            
-            await self.broadcast(json.dumps({
-                "type": "player_answered",
-                "player": jogador.nome
-            }))
-
-            if all(j.respondeu_atual for j in self.jogadores):
-                self.pergunta_atual = random.choice(PERGUNTAS)
-                await self.enviar_pergunta()
-
     async def finalizar_jogo(self):
         resultados = [
             {
@@ -192,7 +176,42 @@ async def handle_connection(websocket, path):
     finally:
         await jogo.remover_jogador(websocket)
 
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('10.255.255.255', 1))
+        IP = s.getsockname()[0]
+    except Exception:
+        IP = '127.0.0.1'
+    finally:
+        s.close()
+    return IP
+
+class DiscoveryServer:
+    def __init__(self):
+        self.ip = get_local_ip()
+
+    async def run(self):
+        loop = asyncio.get_running_loop()
+        transport, _ = await loop.create_datagram_endpoint(
+            lambda: DiscoveryServerProtocol(self.ip),
+            local_addr=('0.0.0.0', 5000)
+        )
+
+class DiscoveryServerProtocol:
+    def __init__(self, server_ip):
+        self.server_ip = server_ip
+
+    def connection_made(self, transport):
+        self.transport = transport
+
+    def datagram_received(self, data, addr):
+        if data == b'DISCOVER_TRIVIA_SERVER':
+            self.transport.sendto(self.server_ip.encode(), addr)
+
+discovery_server = DiscoveryServer()
 start_server = websockets.serve(handle_connection, "0.0.0.0", 8765)
 
 asyncio.get_event_loop().run_until_complete(start_server)
+asyncio.get_event_loop().create_task(discovery_server.run())
 asyncio.get_event_loop().run_forever()
